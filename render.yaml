@@ -1,0 +1,10 @@
+# Render Blueprint: the service as code.
+# Auto-deploy is off on purpose: deploys are triggered by the GitHub Actions pipeline
+# (deploy hook) only after lint, tests and the Docker check have passed.
+services:
+  - type: web
+    name: fastapi-render-cicd
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: false

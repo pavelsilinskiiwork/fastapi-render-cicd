@@ -6,7 +6,7 @@ client = TestClient(app)
 
 
 def test_health():
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "nope"}
 
 
 def test_version_reports_the_commit_from_the_environment(monkeypatch):

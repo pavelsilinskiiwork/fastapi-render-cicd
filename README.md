@@ -22,12 +22,12 @@ pull request / push to main
 
 ## What each gate catches
 
-| Gate | Catches |
-| --- | --- |
-| `lint` | style drift, unused imports, likely bugs (ruff rules E, F, I, B, UP) |
-| `test` | broken behaviour; differences between Python versions; untested code (coverage below 90% fails) |
-| `docker` | a Dockerfile that does not build, or an image whose service does not start |
-| `deploy` / hook | nothing deploys unless the three jobs above passed (`needs:`); only `main` deploys |
+| Gate                  | Catches                                                                                                                                   |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`                | style drift, unused imports, likely bugs (ruff rules E, F, I, B, UP)                                                                      |
+| `test`                | broken behaviour; differences between Python versions; untested code (coverage below 90% fails)                                           |
+| `docker`              | a Dockerfile that does not build, or an image whose service does not start                                                                |
+| `deploy` / hook       | nothing deploys unless the three jobs above passed (`needs:`); only `main` deploys                                                        |
 | `deploy` / smoke test | "deploy queued" is not "deploy live": the job fails if production does not report the new commit within 15 minutes or `/health` is not ok |
 
 Other choices worth knowing about:
@@ -37,25 +37,27 @@ Other choices worth knowing about:
 - **Least privilege.** The workflow token is `contents: read`. The deploy hook is a secret and is never printed.
 - **The smoke-test script is tested** (`tests/test_smoke_script.py`) against a real local HTTP server: old version
   still answering, service unreachable during a deploy, new commit live but unhealthy, timeout.
-- **Dependabot** keeps the Actions, pip packages and the base Docker image up to date.
+- **Dependabot** keeps the Actions, pip packages and the base Docker image up to date; its pull requests go
+  through the same gates before anyone merges them.
+- **Only a push to `main` deploys.** Pull requests and manual runs (`workflow_dispatch`) run the checks and skip `deploy`.
 
 ## Set it up
 
 1. **Create the repository** on GitHub and push this code to `main`.
-2. **Create the Render service.** Either use *New → Blueprint* (reads `render.yaml`) or create a Web Service from
-   this repo with the Docker runtime. In *Settings → Build & Deploy* set **Auto-Deploy to Off**: the pipeline
+2. **Create the Render service.** Either use _New → Blueprint_ (reads `render.yaml`) or create a Web Service from
+   this repo with the Docker runtime. In _Settings → Build & Deploy_ set **Auto-Deploy to Off**: the pipeline
    decides when to deploy. Health check path: `/health`.
 3. **Connect the pipeline to Render.**
-   - In Render: *Settings → Deploy Hook* → copy the URL.
-   - In GitHub: *Settings → Environments → New environment* named `production`.
+   - In Render: _Settings → Deploy Hook_ → copy the URL.
+   - In GitHub: _Settings → Environments → New environment_ named `production`.
      Add the secret `RENDER_DEPLOY_HOOK_URL` (the hook URL) and the variable `SERVICE_URL`
      (for example `https://fastapi-render-cicd.onrender.com`).
-4. **Protect `main`** (*Settings → Branches*): require the `lint`, `test` and `docker` checks before merging.
-5. Push a commit. Watch *Actions*: after the three checks pass, `deploy` waits for production to report the commit.
+4. **Protect `main`** (_Settings → Branches_): require the `lint`, `test` and `docker` checks before merging.
+5. Push a commit. Watch _Actions_: after the three checks pass, `deploy` waits for production to report the commit.
 
 ## Prove that the gates work
 
-Do these once and keep the screenshots of the runs, they are the real evidence:
+Three experiments, with the results in [Evidence](#evidence):
 
 1. **Failing test.** Change an assertion in `tests/test_api.py`, push to a branch, open a pull request: `test` goes red.
    Merge is blocked; no deploy.
@@ -75,6 +77,36 @@ docker build -t service .
 docker run -p 8000:8000 -e GIT_SHA=local service
 python scripts/smoke_test.py http://localhost:8000 --sha local --timeout 30 --interval 2
 ```
+
+## Evidence
+
+These are real runs of this pipeline.
+
+| What I did                               | Result                                                                                                                                                                 |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Broke a test on purpose (PR #9)          | `test` fails on Python 3.11, 3.12 and 3.13; `lint` and `docker` pass; `deploy` is skipped                                                                              |
+| Broke the Dockerfile on purpose (PR #10) | only `docker` fails; `lint` and the three `test` jobs pass; `deploy` is skipped                                                                                        |
+| Pushed a good commit to `main`           | all checks pass; `deploy` asks Render for this exact commit, sees the old version (`0c31bf2`) answer twice, then reports `4aa613a` live and healthy; the job took 34 s |
+
+**1. A failing test blocks everything after it**
+
+![test fails on all three Python versions](docs/01-test-fails.png)
+
+**2. A broken Dockerfile fails only the Docker check**
+
+![docker fails, lint and test pass](docs/02-docker-fails.png)
+
+**3. The deploy waits for the new commit**
+
+![deploy log: old version, old version, then the new commit is live](docs/03-deploy-log.png)
+
+`/version` on production reports the same commit:
+
+![version endpoint on production](docs/03-version-live.png)
+
+**Run history**, red experiments next to green deploys and Dependabot pull requests that went through the same checks:
+
+![Actions history](docs/04-actions-history.png)
 
 ## Limitations
 
